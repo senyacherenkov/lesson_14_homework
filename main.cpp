@@ -2,20 +2,32 @@
 #include "matrix.h"
 #include <cassert>
 
+constexpr int DIAGONAL_LIMIT = 10;
+
 int main()
 {
-    Matrix<int, -1> matrix; // бесконечная матрица int заполнена значениями -1
-    assert(matrix.size() == 0); // все ячейки свободны
+    Matrix<int, 0> matrix; // бесконечная матрица int заполнена значениями 0
 
-    auto a = matrix[0][0];
-    assert(a == -1);
-    assert(matrix.size() == 0);
+    for(int i = 0; i < DIAGONAL_LIMIT; i++) {
+        matrix[i][i] = i;
+    }
 
-    matrix[100][100] = 314;
-    assert(matrix[100][100] == 314);
-    assert(matrix.size() == 1);
-    // выведется одна строка
-    // 100100314
+    int i = 0;
+    int j = 9;
+    for(; i < DIAGONAL_LIMIT; i++, j--) {
+        matrix[i][j] = j;
+    }
+
+    assert(matrix.size() == 18);
+
+    for(int i = 1; i < DIAGONAL_LIMIT - 1; i++) {
+        for(int j = 1; j < DIAGONAL_LIMIT - 1; j++)
+            std::cout << matrix[i][j] << " ";
+        std::cout << std::endl;
+    }
+
+    std::cout << "Quantity of busy cells: " << matrix.size();
+
     for(auto c: matrix)
     {
         int x;
