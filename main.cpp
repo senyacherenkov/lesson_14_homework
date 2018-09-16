@@ -1,6 +1,6 @@
 #include <iostream>
-#include "matrix.h"
 #include <cassert>
+#include "matrix.h"
 
 constexpr int DIAGONAL_LIMIT = 10;
 
