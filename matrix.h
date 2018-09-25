@@ -1,179 +1,106 @@
 #pragma once
-#include <vector>
-#include <algorithm>
-#include <tuple>
-#include <map>
-#include <iterator>
-#include <functional>
+#include <unordered_map>
+#include <cassert>
+#include <memory>
 #include <iostream>
 
-template <typename T, T DEFAULT_VALUE> class Element;
-template <typename T, T DEFAULT_VALUE> std::ostream& operator<<( std::ostream&, const Element<T, DEFAULT_VALUE>& );
-
-namespace  {
-    using DestroyElementCallback = std::function<void(std::int32_t)>;
-}
-
-template<typename T, T DEFAULT_VALUE>
-class Element {
-    using MatrixCallback = std::function<void(std::int32_t, T)>;    
-public:
-    Element():
-        m_callback(nullptr)
-    {}
-
-    Element(const Element& other) {
-        m_number = other.m_number;
-        m_baseElement = other.m_baseElement;
-        m_callback = other.m_callback;
-        m_destroyCallback = other.m_destroyCallback;
-        if(other.m_baseElement == DEFAULT_VALUE)
-            other.m_destroyCallback(other.m_number);
-    }
-
-    Element& operator= (const T& value) {
-        m_baseElement = value;
-        if((m_baseElement != DEFAULT_VALUE) && m_callback)
-            m_callback(m_number, value);
-        return *this;
-    }
-
-    bool operator== (const T& value) { return m_baseElement == value; }
-
-    void setNumberKey(std::int32_t key) { m_number = key; }
-    void setCallback(MatrixCallback callback) { m_callback = callback; }
-    void setDestroyCallback(DestroyElementCallback callback) { m_destroyCallback = callback; }
-    T getElement() const { return m_baseElement; }
-
-private:
-    std::size_t             m_number = 0;
-    T                       m_baseElement;
-    MatrixCallback          m_callback;
-    DestroyElementCallback  m_destroyCallback;
-};
-
-template <typename T, T DEFAULT_VALUE>
-class Row
-{
-    using MatrixCallback = std::function<void(std::int32_t, T)>;
-public:
-    Row():
-        m_callback(nullptr),
-        m_destroyCallBack(std::bind(&Row::destroyElement, this, std::placeholders::_1))
-    {}
-
-    auto& operator[] (const std::int32_t& column)
-    {
-        if(m_ElementBuff.find(column) == m_ElementBuff.end()) {
-            m_ElementBuff[column] = DEFAULT_VALUE;
-            if(m_callback)
-                m_ElementBuff[column].setCallback(m_callback);
-            m_ElementBuff[column].setNumberKey(column);
-            m_ElementBuff[column].setDestroyCallback(m_destroyCallBack);
-        }
-        return m_ElementBuff[column];
-    }
-
-    void setCallback(MatrixCallback callback) { m_callback = callback; }
-    void setDestroyCallback(DestroyElementCallback callback) { m_destroyMatrixCallBack = callback; }
-    std::size_t size() { return m_ElementBuff.size(); }
-
-    void destroyElement(std::int32_t key) {
-        if(m_ElementBuff.find(key) != m_ElementBuff.end())
-            m_ElementBuff.erase(key);
-        if(m_destroyMatrixCallBack)
-            m_destroyMatrixCallBack(key);
-    }
-private:
-    std::map<std::int32_t, Element<T, DEFAULT_VALUE>>   m_ElementBuff;
-    MatrixCallback                                      m_callback;
-    DestroyElementCallback                              m_destroyCallBack;
-    DestroyElementCallback                              m_destroyMatrixCallBack;
-};
-
-
-template <typename T, T DEFAULT_VALUE>
+template <typename T, T DEFAULT>
 class Matrix
 {
-    using MatrixCallback = std::function<void(std::int32_t, T)>;
-public:
-    struct iterator_ {
-        std::vector<std::tuple<int, int, T>> m_data;
-        std::size_t m_pointer = 0;
+    using Index = std::int32_t;
+    using Cell = std::pair<Index, Index>;
 
-        iterator_(std::vector<std::tuple<int, int, T>>& data):
-            m_data(data),
-            m_pointer(0)
-        {}
+    //For more effective code I want to use std::unordered_map instead of std::map. As a key I want to use pair of values:
+    //    - raw;
+    //    - column.
+    //Due to fact that we cannot calculate hash from std::pair we need to provide user vision of hash from std::pair.
 
-        iterator_(std::vector<std::tuple<int, int, T>>& data, std::size_t pointer):
-            m_data(data),
-            m_pointer(pointer)
-        {}
+    struct pairhash
+    {
+    public:
+        //user hash should be a callable object
+        std::size_t operator()(const Cell& key) const
+        {
+            return std::hash<Index>()(key.first) ^ std::hash<Index>()(key.second); //Internet sad, that it should be XOR
+        }
+    };
 
-        bool operator!=(const iterator_& other) { return !(*this == other); }
-        bool operator==(const iterator_& other) { return m_pointer == other.m_pointer; }
+    using HashMap = std::unordered_map<Cell, T, pairhash>;
+    using HashMapIterator = typename std::unordered_map<Cell, T, pairhash>::iterator;
 
-        iterator_& operator++() {
-            m_pointer++;
+    //--------------------------------------------------------------------------------------------------------------------
+    class ColumnProxy
+    {
+    public:
+        ColumnProxy(Matrix* matrix, Index raw, Index column)
+            : m_matrix(matrix), m_row(raw), m_column(column) { }
+
+        ColumnProxy& operator= (const T& value)
+        {
+            if(value != DEFAULT)
+                m_matrix->insert(m_row, m_column, value);
             return *this;
         }
 
-        iterator_ operator++(int) {
-            iterator_ result(*this);
-            ++(*this);
-            return result;
+        operator T() const { return m_matrix->getValue(m_row, m_column); }
+    private:
+        Matrix* m_matrix;
+        const Index m_row;
+        const Index m_column;
+    };
+
+    //--------------------------------------------------------------------------------------------------------------------
+    class RawProxy
+    {
+    public:
+        RawProxy(Matrix* matrix, const Index row): m_matrix(matrix), m_row(row) {}
+        auto operator[] (const Index column) { return ColumnProxy(m_matrix, m_row, column); }
+    private:
+        Matrix* m_matrix;
+        const Index m_row;
+    };
+
+    //--------------------------------------------------------------------------------------------------------------------
+
+    class MatrixIterator
+    {
+    public:
+        MatrixIterator(const MatrixIterator &it) { m_iterator = it.m_iterator; }
+        MatrixIterator(HashMapIterator _p) : m_iterator(_p) { }
+        bool operator!=(MatrixIterator const& other) const { return m_iterator != other.m_iterator; }
+        bool operator==(MatrixIterator const& other) const { return m_iterator == other.m_iterator; }
+        auto operator*() const { return std::tuple<Index,Index,T>(m_iterator->first.first, m_iterator->first.second, m_iterator->second); }
+        MatrixIterator& operator++()
+        {
+            ++m_iterator;
+            return *this;
         }
-        std::tuple<int, int, T>& operator*() { return m_data.at(m_pointer); }
+    private:
+        HashMapIterator m_iterator;
     };
 
 public:
-    Matrix():
-        m_callBack(std::bind(&Matrix::fillMatrixStore, this, std::placeholders::_1, std::placeholders::_2)),
-        m_destroyMatrixCallBack(std::bind(&Matrix::destroyRows, this, std::placeholders::_1))
-    {}
+    Matrix() = default;
 
-    auto& operator[] (const std::int32_t& row)
-    {
-        m_row = row;
-        auto& tempRow = m_rowBuff[row];
-        tempRow.setCallback(m_callBack);
-        tempRow.setDestroyCallback(m_destroyMatrixCallBack);
-        return tempRow;
-    }
+    auto operator[] (const Index row) { return RawProxy(this, row); }
 
-    std::int32_t size() const { return m_store.size(); }
 
-    void fillMatrixStore(std::int32_t key, T value) {
-        m_store.push_back(std::make_tuple(m_row, key, value));
-    }
+    auto begin() { return MatrixIterator(m_data.begin()); }
+    auto end() { return MatrixIterator(m_data.end()); }
 
-    void destroyRows(std::int32_t key) {
-        for(auto iter = m_rowBuff.begin(); iter != m_rowBuff.end(); )
-        {
-            if(iter->second.size() == 0)
-            {
-                m_rowBuff.erase(iter++);
-            }
-            else
-            {
-                ++iter;
-            }
-        }
-    }
-    iterator_ begin() { return iterator_(m_store); }
-    iterator_ end() {return iterator_(m_store, m_store.size()); }
+    std::size_t size() const { return m_data.size(); }
 
 private:
-    std::map<std::int32_t, Row<T,DEFAULT_VALUE>>    m_rowBuff;
-    std::vector<std::tuple<int, int, T>>            m_store;    
-    std::int32_t                                    m_row = 0;
-    MatrixCallback                                  m_callBack;
-    DestroyElementCallback                          m_destroyMatrixCallBack;
-};
+    void insert(Index row, Index column, const T& value) { m_data[Cell(row, column)] = value; }
 
-template <typename T, T DEFAULT_VALUE>
-std::ostream& operator<<( std::ostream& os, const Element<T, DEFAULT_VALUE>& t ) {
-   os << t.getElement();
-   return os;
-}
+    T getValue(Index row, Index column)
+    {
+        auto value = m_data.find(Cell(row, column));
+        if (value != m_data.end())
+            return value->second;
+        else
+            return DEFAULT;
+    }
+private:
+    HashMap m_data;
+};
