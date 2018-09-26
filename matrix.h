@@ -29,17 +29,19 @@ class Matrix
     using HashMapIterator = typename std::unordered_map<Cell, T, pairhash>::iterator;
 
     //--------------------------------------------------------------------------------------------------------------------
-    class ColumnProxy
+    class Value
     {
     public:
-        ColumnProxy(Matrix* matrix, Index raw, Index column)
+        Value(Matrix* matrix, Index raw, Index column)
             : m_matrix(matrix), m_row(raw), m_column(column) { }
 
-        ColumnProxy& operator= (const T& value)
+        Value& operator= (const T& value)
         {
-            if(value != DEFAULT)
+            if(value != DEFAULT) {
+                assert(m_matrix);
                 m_matrix->insert(m_row, m_column, value);
-            return *this;
+            }
+            return *this;            
         }
 
         operator T() const { return m_matrix->getValue(m_row, m_column); }
@@ -50,11 +52,11 @@ class Matrix
     };
 
     //--------------------------------------------------------------------------------------------------------------------
-    class RawProxy
+    class ProxyClass
     {
     public:
-        RawProxy(Matrix* matrix, const Index row): m_matrix(matrix), m_row(row) {}
-        auto operator[] (const Index column) { return ColumnProxy(m_matrix, m_row, column); }
+        ProxyClass(Matrix* matrix, const Index row): m_matrix(matrix), m_row(row) {}
+        auto operator[] (const Index column) { return Value(m_matrix, m_row, column); }
     private:
         Matrix* m_matrix;
         const Index m_row;
@@ -82,7 +84,7 @@ class Matrix
 public:
     Matrix() = default;
 
-    auto operator[] (const Index row) { return RawProxy(this, row); }
+    auto operator[] (const Index row) { return ProxyClass(this, row); }
 
 
     auto begin() { return MatrixIterator(m_data.begin()); }
@@ -93,7 +95,7 @@ public:
 private:
     void insert(Index row, Index column, const T& value) { m_data[Cell(row, column)] = value; }
 
-    T getValue(Index row, Index column)
+    T getValue(Index row, Index column) const
     {
         auto value = m_data.find(Cell(row, column));
         if (value != m_data.end())
